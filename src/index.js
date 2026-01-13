@@ -15,15 +15,33 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// -------- LOAD COMMANDS --------
+// -------- RECURSIVE COMMAND LOADER --------
 const commands = [];
-const commandsPath = path.join(__dirname, "commands");
 
-for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith(".js"))) {
-  const command = require(`./commands/${file}`);
-  client.commands.set(command.data.name, command);
-  commands.push(command.data.toJSON());
+function loadCommands(dir) {
+  const files = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const file of files) {
+    const fullPath = path.join(dir, file.name);
+
+    if (file.isDirectory()) {
+      // go deeper (econ, mods, fun, etc.)
+      loadCommands(fullPath);
+    } else if (file.name.endsWith(".js")) {
+      const command = require(fullPath);
+
+      if (!command.data || !command.execute) {
+        console.warn(`⚠️ Skipping invalid command file: ${fullPath}`);
+        continue;
+      }
+
+      client.commands.set(command.data.name, command);
+      commands.push(command.data.toJSON());
+    }
+  }
 }
+
+loadCommands(path.join(__dirname, "commands"));
 
 // -------- REGISTER SLASH COMMANDS --------
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
@@ -37,7 +55,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
     );
     console.log("✅ Slash commands registered");
   } catch (error) {
-    console.error(error);
+    console.error("❌ Failed to register commands:", error);
   }
 })();
 
@@ -56,7 +74,18 @@ client.on("interactionCreate", async interaction => {
     await command.execute(interaction);
   } catch (error) {
     console.error(error);
-    interaction.reply({ content: "❌ Error executing command.", ephemeral: true });
+
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({ 
+        content: "❌ Error executing this command.", 
+        ephemeral: true 
+      });
+    } else {
+      await interaction.reply({ 
+        content: "❌ Error executing this command.", 
+        ephemeral: true 
+      });
+    }
   }
 });
 
